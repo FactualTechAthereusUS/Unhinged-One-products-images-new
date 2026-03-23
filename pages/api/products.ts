@@ -2,136 +2,147 @@ import { NextApiRequest, NextApiResponse } from 'next'
 import axios from 'axios'
 
 const API_BASE = 'https://api.printify.com/v1'
-const TOKEN = process.env.NEXT_PUBLIC_PRINTIFY_TOKEN
+// Server-side only — never use NEXT_PUBLIC_ for secret tokens
+const TOKEN = process.env.PRINTIFY_TOKEN
 
-// In-memory cache for Swift Pod products
-let swiftPodCache: any[] = []
-let cacheTimestamp = 0
+// In-memory cache per provider
+const providerCache = new Map<number, { products: any[]; timestamp: number; building: boolean }>()
 const CACHE_DURATION = 5 * 60 * 1000 // 5 minutes
+const MAX_PAGES = 5          // 5 × 50 = 250 max products per provider
+const PAGE_SIZE = 50
+const REQUEST_TIMEOUT = 12000 // 12s
+
+function buildProviderCache(shopId: string, providerId: number) {
+  const entry = providerCache.get(providerId)
+  if (entry?.building) return // already in progress
+  
+  // Mark as building immediately
+  providerCache.set(providerId, { products: entry?.products || [], timestamp: entry?.timestamp || 0, building: true })
+
+  const requests = Array.from({ length: MAX_PAGES }, (_, i) =>
+    axios.get(`${API_BASE}/shops/${shopId}/products.json`, {
+      headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' },
+      params: { page: i + 1, limit: PAGE_SIZE },
+      timeout: REQUEST_TIMEOUT,
+    })
+  )
+
+  Promise.allSettled(requests).then(results => {
+    let allProducts: any[] = []
+    for (const result of results) {
+      if (result.status === 'fulfilled') {
+        const products = result.value.data?.data || []
+        allProducts = allProducts.concat(products)
+        // Stop early if a page came back empty (no more products)
+        if (products.length < PAGE_SIZE) break
+      }
+    }
+
+    const filtered = allProducts.filter((p: any) => p.print_provider_id === providerId)
+    providerCache.set(providerId, { products: filtered, timestamp: Date.now(), building: false })
+    console.log(`[products] Cached ${filtered.length} products for provider ${providerId}`)
+  }).catch(err => {
+    console.error('[products] Background cache build failed:', err)
+    const current = providerCache.get(providerId)
+    if (current) providerCache.set(providerId, { ...current, building: false })
+  })
+}
+
+function optimizeProduct(product: any) {
+  return {
+    id: product.id,
+    title: product.title,
+    tags: product.tags || [],
+    images: product.images ? product.images.slice(0, 4) : [],
+    print_provider_id: product.print_provider_id,
+    created_at: product.created_at || '',
+  }
+}
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'GET') {
     return res.status(405).json({ error: 'Method not allowed' })
   }
 
-  const { shopId, page = 1, limit = 20, providerId, refresh } = req.query
+  const { shopId, page = '1', limit = '12', providerId, refresh } = req.query
 
   if (!TOKEN) {
-    return res.status(500).json({ error: 'NEXT_PUBLIC_PRINTIFY_TOKEN is not configured' })
+    return res.status(500).json({ error: 'PRINTIFY_TOKEN is not configured on the server' })
   }
 
   if (!shopId) {
     return res.status(400).json({ error: 'Shop ID is required' })
   }
 
+  const targetLimit = Math.min(parseInt(limit as string) || 12, 50)
+  const currentPage = Math.max(parseInt(page as string) || 1, 1)
+  const targetProviderId = providerId ? parseInt(providerId as string) : null
+
   try {
-    const targetLimit = parseInt(limit as string) || 20
-    const currentPage = parseInt(page as string) || 1
-    const targetProviderId = providerId ? parseInt(providerId as string) : null
-    
+    // Without provider filter — simple pass-through to Printify
     if (!targetProviderId) {
-      // If no provider filtering, just return normal results
       const response = await axios.get(`${API_BASE}/shops/${shopId}/products.json`, {
-        headers: { 
-          'Authorization': `Bearer ${TOKEN}`,
-          'Content-Type': 'application/json'
-        },
-        params: {
-          page: page,
-          limit: limit
-        }
+        headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' },
+        params: { page: currentPage, limit: targetLimit },
+        timeout: REQUEST_TIMEOUT,
       })
+      res.setHeader('Cache-Control', 'public, max-age=60, stale-while-revalidate=300')
       return res.status(200).json(response.data)
     }
-    
-    // Check if we have valid cached data
+
+    // With provider filter — use cache
     const now = Date.now()
     const forceRefresh = refresh === 'true'
-    const cacheValid = swiftPodCache.length > 0 && (now - cacheTimestamp) < CACHE_DURATION && !forceRefresh
-    
-        if (!cacheValid) {
-      console.log('Refreshing Swift Pod cache...')
-      
-      // Get Swift Pod products with parallel requests for better performance
-      const maxPages = 8 // Reduced from 10 for faster loading
-      
-      // Create parallel requests
-      const requests = []
-      for (let i = 1; i <= maxPages; i++) {
-        requests.push(
-          axios.get(`${API_BASE}/shops/${shopId}/products.json`, {
-            headers: { 
-              'Authorization': `Bearer ${TOKEN}`,
-              'Content-Type': 'application/json'
-            },
-            params: {
-              page: i,
-              limit: 50
-            },
-            timeout: 8000
-          })
-        )
-      }
-      
-      try {
-        // Execute all requests in parallel
-        const responses = await Promise.all(requests)
-        
-        // Combine and filter all products
-        let allProducts: any[] = []
-        for (const response of responses) {
-          const products = response.data.data || []
-          allProducts = allProducts.concat(products)
-        }
-        
-        // Filter to only Swift Pod products
-        swiftPodCache = allProducts.filter((product: any) => 
-          product.print_provider_id === targetProviderId
-        )
-        
-        cacheTimestamp = now
-        console.log(`Cached ${swiftPodCache.length} Swift Pod products`)
-        
-      } catch (error) {
-        console.error('Error fetching products in parallel:', error)
-        swiftPodCache = []
-      }
+    const cached = providerCache.get(targetProviderId)
+    const cacheValid = cached && cached.products.length > 0 && (now - cached.timestamp) < CACHE_DURATION && !forceRefresh
+
+    if (!cacheValid) {
+      // Kick off background cache build
+      buildProviderCache(shopId as string, targetProviderId)
+
+      // While cache builds, return page 1 from Printify directly (fast first response)
+      const response = await axios.get(`${API_BASE}/shops/${shopId}/products.json`, {
+        headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' },
+        params: { page: currentPage, limit: targetLimit },
+        timeout: REQUEST_TIMEOUT,
+      })
+
+      const rawProducts: any[] = response.data?.data || []
+      const filtered = rawProducts.filter((p: any) => p.print_provider_id === targetProviderId)
+      const optimized = filtered.map(optimizeProduct)
+
+      res.setHeader('Cache-Control', 'public, max-age=30')
+      return res.status(200).json({
+        data: optimized,
+        total: response.data?.total || optimized.length,
+        per_page: targetLimit,
+        current_page: currentPage,
+        last_page: response.data?.last_page || 1,
+        from: (currentPage - 1) * targetLimit + 1,
+        to: (currentPage - 1) * targetLimit + optimized.length,
+        cache_status: 'building',
+      })
     }
-    
-    // Use cached data for pagination
+
+    // Serve from cache with pagination
     const startIndex = (currentPage - 1) * targetLimit
-    const endIndex = startIndex + targetLimit
-    const pageProducts = swiftPodCache.slice(startIndex, endIndex)
-    
-    // Optimize payload - only return essential fields
-    const optimizedProducts = pageProducts.map((product: any) => ({
-      id: product.id,
-      title: product.title,
-      tags: product.tags || [],
-      images: product.images ? product.images.slice(0, 4) : [], // Limit to 4 images max
-      print_provider_id: product.print_provider_id,
-      created_at: product.created_at
-    }))
-    
-    // Use actual cache count for better accuracy
-    const totalProducts = swiftPodCache.length
+    const pageProducts = cached!.products.slice(startIndex, startIndex + targetLimit)
+    const totalProducts = cached!.products.length
     const totalPages = Math.ceil(totalProducts / targetLimit)
-    
-    const result = {
-      data: optimizedProducts,
+
+    res.setHeader('Cache-Control', 'public, max-age=60, stale-while-revalidate=300')
+    return res.status(200).json({
+      data: pageProducts.map(optimizeProduct),
       total: totalProducts,
       per_page: targetLimit,
       current_page: currentPage,
       last_page: totalPages,
       from: startIndex + 1,
-      to: startIndex + optimizedProducts.length,
-      prev_page_url: currentPage > 1 ? `/?page=${currentPage - 1}` : null,
-      next_page_url: currentPage < totalPages ? `/?page=${currentPage + 1}` : null
-    }
-    
-    res.status(200).json(result)
-  } catch (error) {
-    console.error('Failed to fetch products:', error)
-    res.status(500).json({ error: 'Failed to fetch products' })
+      to: startIndex + pageProducts.length,
+      cache_status: 'hit',
+    })
+  } catch (error: any) {
+    console.error('[products] Error:', error?.response?.status, error?.message)
+    return res.status(500).json({ error: 'Failed to fetch products. Check PRINTIFY_TOKEN and shop ID.' })
   }
-} 
+}

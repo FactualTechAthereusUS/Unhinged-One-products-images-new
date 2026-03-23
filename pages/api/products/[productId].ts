@@ -2,7 +2,7 @@ import { NextApiRequest, NextApiResponse } from 'next'
 import axios from 'axios'
 
 const API_BASE = 'https://api.printify.com/v1'
-const TOKEN = process.env.NEXT_PUBLIC_PRINTIFY_TOKEN
+const TOKEN = process.env.PRINTIFY_TOKEN
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'GET') {
@@ -12,7 +12,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const { productId, shopId } = req.query
 
   if (!TOKEN) {
-    return res.status(500).json({ error: 'NEXT_PUBLIC_PRINTIFY_TOKEN is not configured' })
+    return res.status(500).json({ error: 'PRINTIFY_TOKEN is not configured on the server' })
   }
 
   if (!productId || !shopId) {

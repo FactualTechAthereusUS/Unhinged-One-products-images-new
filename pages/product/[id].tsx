@@ -11,189 +11,228 @@ export default function ProductPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [selectedImage, setSelectedImage] = useState<string | null>(null)
+  const [imgLoaded, setImgLoaded] = useState(false)
 
   useEffect(() => {
     if (id && typeof id === 'string') {
-      loadProduct(id)
+      setLoading(true)
+      setError(null)
+      setImgLoaded(false)
+      fetchProductById(id)
+        .then(data => {
+          setProduct(data)
+          setSelectedImage(data.images?.[0]?.src || null)
+        })
+        .catch(err => setError(err instanceof Error ? err.message : 'Failed to load product'))
+        .finally(() => setLoading(false))
     }
   }, [id])
 
-  const loadProduct = async (productId: string) => {
-    try {
-      setLoading(true)
-      setError(null)
-      const data = await fetchProductById(productId)
-      setProduct(data)
-      if (data.images && data.images.length > 0) {
-        setSelectedImage(data.images[0].src)
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load product')
-    } finally {
-      setLoading(false)
-    }
+  const openInNewTab = (url: string) =>
+    window.open(getProxyImageUrl(url), '_blank', 'noopener,noreferrer')
+
+  const handleSelectImage = (src: string) => {
+    setSelectedImage(src)
+    setImgLoaded(false)
   }
 
-  const openImageInNewTab = (imageUrl: string) => {
-    window.open(getProxyImageUrl(imageUrl), '_blank', 'noopener,noreferrer')
-  }
-
+  // ── Loading ──────────────────────────────────────────────────────
   if (loading) {
     return (
-      <div className="min-h-screen p-6 bg-gray-50">
-        <div className="max-w-7xl mx-auto">
-          <div className="mb-6">
-            <Link href="/" className="text-primary-600 hover:text-primary-800 font-medium">
-              ← Back to Products
-            </Link>
-          </div>
-          <div className="flex items-center justify-center h-64">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600"></div>
-            <span className="ml-3 text-lg text-gray-600">Loading product...</span>
-          </div>
-        </div>
-      </div>
-    )
-  }
-
-  if (error) {
-    return (
-      <div className="min-h-screen p-6 bg-gray-50">
-        <div className="max-w-7xl mx-auto">
-          <div className="mb-6">
-            <Link href="/" className="text-primary-600 hover:text-primary-800 font-medium">
-              ← Back to Products
-            </Link>
-          </div>
-          <div className="bg-red-50 border border-red-200 rounded-lg p-6">
-            <div className="flex items-center">
-              <div className="flex-shrink-0">
-                <svg className="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
-                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
-                </svg>
-              </div>
-              <div className="ml-3">
-                <h3 className="text-sm font-medium text-red-800">Error loading product</h3>
-                <p className="text-sm text-red-700 mt-1">{error}</p>
+      <div style={{ minHeight: '100vh', background: 'var(--bg-base)', padding: '32px 24px' }}>
+        <div style={{ maxWidth: 1100, margin: '0 auto' }}>
+          <div className="skeleton" style={{ height: 18, width: 140, marginBottom: 32, borderRadius: 6 }} />
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 32 }}>
+            <div>
+              <div className="skeleton" style={{ aspectRatio: '1', borderRadius: 16 }} />
+            </div>
+            <div>
+              <div className="skeleton" style={{ height: 24, width: '70%', marginBottom: 20 }} />
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
+                {Array.from({ length: 6 }).map((_, i) => (
+                  <div key={i} className="skeleton" style={{ aspectRatio: '1', borderRadius: 10 }} />
+                ))}
               </div>
             </div>
-            <div className="mt-4">
-              <button 
-                onClick={() => id && typeof id === 'string' && loadProduct(id)}
-                className="bg-red-100 hover:bg-red-200 text-red-800 px-4 py-2 rounded-md text-sm font-medium"
-              >
-                Try Again
-              </button>
-            </div>
           </div>
         </div>
       </div>
     )
   }
 
-  if (!product) {
+  // ── Error ────────────────────────────────────────────────────────
+  if (error || !product) {
     return (
-      <div className="min-h-screen p-6 bg-gray-50">
-        <div className="max-w-7xl mx-auto">
-          <div className="mb-6">
-            <Link href="/" className="text-primary-600 hover:text-primary-800 font-medium">
-              ← Back to Products
-            </Link>
-          </div>
-          <div className="text-center py-12">
-            <p className="text-gray-500 text-lg">Product not found.</p>
-          </div>
-        </div>
-      </div>
-    )
-  }
-
-  return (
-    <div className="min-h-screen p-6 bg-gray-50">
-      <div className="max-w-7xl mx-auto">
-        {/* Navigation */}
-        <div className="mb-6">
-          <Link href="/" className="text-primary-600 hover:text-primary-800 font-medium">
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-base)' }}>
+        <div style={{ textAlign: 'center', padding: 48, background: 'var(--bg-surface)', borderRadius: 20, border: '1px solid var(--border)', maxWidth: 400 }}>
+          <div style={{ fontSize: 48, marginBottom: 16 }}>⚠️</div>
+          <h2 style={{ color: 'var(--text-primary)', marginBottom: 8 }}>Product not found</h2>
+          <p style={{ color: 'var(--text-secondary)', marginBottom: 24, fontSize: '0.9rem' }}>{error}</p>
+          <Link href="/" className="pill active" style={{ fontSize: '0.9rem', padding: '10px 28px', textDecoration: 'none' }}>
             ← Back to Products
           </Link>
         </div>
+      </div>
+    )
+  }
 
-        {/* Product Header */}
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">{product.title}</h1>
+  const images = product.images || []
+
+  // ── Main ─────────────────────────────────────────────────────────
+  return (
+    <div style={{ minHeight: '100vh', background: 'var(--bg-base)' }}>
+      {/* ── Nav bar ── */}
+      <header style={{
+        background: 'linear-gradient(135deg, #0d0d14 0%, #1a0a2e 50%, #0d0d14 100%)',
+        borderBottom: '1px solid var(--border)',
+        padding: '18px 24px',
+        position: 'sticky', top: 0, zIndex: 50,
+      }}>
+        <div style={{ maxWidth: 1100, margin: '0 auto', display: 'flex', alignItems: 'center', gap: 16 }}>
+          <Link href="/" style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--text-secondary)', textDecoration: 'none', fontSize: '0.875rem', transition: 'color 0.15s' }}
+            onMouseEnter={e => (e.currentTarget as HTMLElement).style.color = 'var(--text-primary)'}
+            onMouseLeave={e => (e.currentTarget as HTMLElement).style.color = 'var(--text-secondary)'}>
+            <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7"/>
+            </svg>
+            Products
+          </Link>
+          <span style={{ color: 'var(--border)', fontSize: '1rem' }}>/</span>
+          <span style={{ color: 'var(--text-primary)', fontSize: '0.875rem', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '60vw' }}>
+            {product.title}
+          </span>
         </div>
+      </header>
 
-        {/* Main Content */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-          {/* Selected Image */}
-          <div className="space-y-4">
-            <div className="bg-white rounded-lg shadow-sm p-4">
-              <div 
-                className="aspect-square bg-gray-100 rounded-lg overflow-hidden cursor-pointer hover:ring-2 hover:ring-primary-500 transition-all"
-                onClick={() => selectedImage && openImageInNewTab(selectedImage)}
-              >
-                <img
-                  src={getProxyImageUrl(selectedImage || product.images?.[0]?.src || PLACEHOLDER_IMAGE)}
-                  alt={product.title}
-                  className="w-full h-full object-cover hover:scale-105 transition-transform duration-200"
-                />
+      <main style={{ maxWidth: 1100, margin: '0 auto', padding: '40px 24px' }}>
+        {/* ── Title ── */}
+        <h1 style={{ fontSize: '1.8rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: 32, lineHeight: 1.3 }}>
+          {product.title}
+        </h1>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)', gap: 40, alignItems: 'start' }}>
+          {/* ── Hero image ── */}
+          <div>
+            <div
+              onClick={() => selectedImage && openInNewTab(selectedImage)}
+              style={{
+                background: 'var(--bg-card)',
+                border: '1px solid var(--border)',
+                borderRadius: 16,
+                overflow: 'hidden',
+                aspectRatio: '1',
+                position: 'relative',
+                cursor: 'zoom-in',
+                transition: 'border-color 0.2s',
+              }}
+              onMouseEnter={e => (e.currentTarget as HTMLElement).style.borderColor = 'var(--accent)'}
+              onMouseLeave={e => (e.currentTarget as HTMLElement).style.borderColor = 'var(--border)'}
+            >
+              {!imgLoaded && <div className="skeleton" style={{ position: 'absolute', inset: 0 }} />}
+              <img
+                key={selectedImage || ''}
+                src={getProxyImageUrl(selectedImage || product.images?.[0]?.src || PLACEHOLDER_IMAGE)}
+                alt={product.title}
+                onLoad={() => setImgLoaded(true)}
+                style={{
+                  width: '100%', height: '100%', objectFit: 'cover',
+                  opacity: imgLoaded ? 1 : 0,
+                  transition: 'opacity 0.3s ease',
+                }}
+              />
+              {/* Open hint overlay */}
+              <div style={{
+                position: 'absolute', inset: 0,
+                background: 'rgba(0,0,0,0)',
+                display: 'flex', alignItems: 'flex-end', justifyContent: 'flex-end',
+                padding: 12,
+                transition: 'background 0.2s',
+              }}>
+                <span style={{
+                  background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(8px)',
+                  color: '#fff', fontSize: '0.72rem', padding: '4px 10px', borderRadius: 999,
+                  border: '1px solid var(--border)',
+                }}>
+                  Click to open full size ↗
+                </span>
               </div>
-              {selectedImage && (
-                <p className="mt-2 text-sm text-gray-600 text-center">
-                  Click image to open in new tab
-                </p>
-              )}
             </div>
+
+            {/* Tags */}
+            {product.tags?.length > 0 && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 16 }}>
+                {product.tags.slice(0, 6).map(tag => (
+                  <span key={tag} style={{
+                    fontSize: '0.72rem', background: 'var(--bg-elevated)', color: 'var(--text-muted)',
+                    border: '1px solid var(--border)', borderRadius: 999, padding: '3px 10px',
+                  }}>{tag}</span>
+                ))}
+              </div>
+            )}
           </div>
 
-          {/* All Images Grid */}
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <h2 className="text-xl font-semibold text-gray-900">
-                All Mockups ({product.images?.length || 0})
+          {/* ── Thumbnails panel ── */}
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+              <h2 style={{ color: 'var(--text-primary)', fontSize: '1rem', fontWeight: 600 }}>
+                All Mockups
+                <span style={{ color: 'var(--text-muted)', fontWeight: 400, marginLeft: 8 }}>({images.length})</span>
               </h2>
-              <div className="text-sm text-gray-600 bg-primary-50 px-3 py-1 rounded-full">
-                💡 Click any image to open full size
-              </div>
             </div>
-            
-            {product.images && product.images.length > 0 ? (
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                {product.images.map((image, index) => (
+
+            {images.length > 0 ? (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
+                {images.map((img, i) => (
                   <div
-                    key={index}
-                    className={`group relative bg-white rounded-lg shadow-sm overflow-hidden cursor-pointer transition-all duration-200 ${
-                      selectedImage === image.src ? 'ring-2 ring-primary-500' : 'hover:shadow-md hover:ring-2 hover:ring-gray-300'
-                    }`}
-                    onClick={() => {
-                      setSelectedImage(image.src)
-                      openImageInNewTab(image.src)
+                    key={i}
+                    onClick={() => { handleSelectImage(img.src); openInNewTab(img.src) }}
+                    style={{
+                      borderRadius: 10, overflow: 'hidden', aspectRatio: '1',
+                      background: 'var(--bg-card)',
+                      border: `1px solid ${selectedImage === img.src ? 'var(--accent)' : 'var(--border)'}`,
+                      cursor: 'pointer',
+                      transition: 'border-color 0.18s, transform 0.18s',
+                      position: 'relative',
+                    }}
+                    onMouseEnter={e => {
+                      const el = e.currentTarget as HTMLElement
+                      if (selectedImage !== img.src) el.style.borderColor = 'var(--border-hover)'
+                      el.style.transform = 'scale(1.03)'
+                    }}
+                    onMouseLeave={e => {
+                      const el = e.currentTarget as HTMLElement
+                      if (selectedImage !== img.src) el.style.borderColor = 'var(--border)'
+                      el.style.transform = 'scale(1)'
                     }}
                   >
-                    <div className="aspect-square bg-gray-100">
-                      <img
-                        src={getProxyImageUrl(image.src)}
-                        alt={`${product.title} mockup ${index + 1}`}
-                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
-                      />
-                    </div>
-                    {/* Click indicator */}
-                    <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-20 transition-all duration-200 flex items-center justify-center">
-                      <div className="opacity-0 group-hover:opacity-100 transition-opacity duration-200">
-                        <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                        </svg>
+                    <img
+                      src={getProxyImageUrl(img.src)}
+                      alt={`${product.title} mockup ${i + 1}`}
+                      loading="lazy"
+                      style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                    />
+                    {selectedImage === img.src && (
+                      <div style={{
+                        position: 'absolute', inset: 0,
+                        background: 'rgba(124,58,237,0.15)',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      }}>
+                        <div style={{ background: 'var(--accent)', borderRadius: '50%', width: 20, height: 20, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          <svg width="10" height="10" fill="none" viewBox="0 0 24 24" stroke="white" strokeWidth={3}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7"/>
+                          </svg>
+                        </div>
                       </div>
-                    </div>
+                    )}
                   </div>
                 ))}
               </div>
             ) : (
-              <p className="text-gray-500">No mockup images available for this product.</p>
+              <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>No mockup images available.</p>
             )}
           </div>
         </div>
-      </div>
+      </main>
     </div>
   )
-} 
+}
